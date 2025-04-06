@@ -1,0 +1,6 @@
+kivy
+kivymd
+pyjnius
+javac-parser
+websocket
+websocket-client
