@@ -21,7 +21,7 @@ from kivy.network.urlrequest import UrlRequest
 from kivy.graphics.texture import Texture
 from functools import partial
 import threading
-import websocket
+import websocket._app as websocket_app
 import os
 from kivy.storage.jsonstore import JsonStore
 
@@ -34,7 +34,7 @@ settings_store = JsonStore(os.path.join(config_dir, 'settings.json'))
 # Notification setup for Android
 if platform == "android":
     from jnius import autoclass
-    from android.runnable import run_on_ui_thread
+    from kivy.clock import run_on_ui_thread
     
     PythonActivity = autoclass("org.kivy.android.PythonActivity")
     NotificationManager = autoclass("android.app.NotificationManager")
@@ -415,7 +415,7 @@ class DrowningDetectionApp(MDApp):
                 Clock.schedule_once(lambda dt: self.update_connection_status("Connected"))
             
             # Create and connect WebSocket
-            self.ws = websocket.WebSocketApp(
+            self.ws = websocket_app.WebSocketApp(
                 self.websocket_url,
                 on_message=on_message,
                 on_error=on_error,

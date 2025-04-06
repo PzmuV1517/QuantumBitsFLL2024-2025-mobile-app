@@ -4,3 +4,6 @@ pyjnius
 javac-parser
 websocket
 websocket-client
+python-for-android
+cython
+buildozer
