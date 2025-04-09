@@ -52,7 +52,7 @@ orientation = portrait
 
 # Android specific
 fullscreen = 0
-android.presplash_color = #3F51B5
+android.presplash_color = #000000
 android.permissions = INTERNET, VIBRATE, WAKE_LOCK
 android.api = 33
 android.minapi = 21

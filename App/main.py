@@ -4,55 +4,81 @@ import json
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
-from kivy.uix.button import Button
-from kivy.uix.textinput import TextInput
 from kivy.uix.label import Label
 from kivy.uix.image import Image
-from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
+from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition, FadeTransition
 from kivy.clock import Clock
 from kivy.graphics.texture import Texture
-from kivy.graphics import Color, Rectangle
+from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.utils import get_color_from_hex
-from kivy.properties import BooleanProperty
+from kivy.properties import BooleanProperty, StringProperty, ObjectProperty
 from kivy.metrics import dp
 from kivy.core.window import Window
 from kivy.animation import Animation
+from kivy.uix.scrollview import ScrollView
+
+# KivyMD imports
+from kivymd.app import MDApp
+from kivymd.uix.button import MDRaisedButton, MDFlatButton, MDIconButton, MDRectangleFlatIconButton
+from kivymd.uix.textfield import MDTextField
+from kivymd.uix.card import MDCard
+from kivymd.uix.label import MDLabel
+from kivymd.uix.toolbar import MDTopAppBar
+from kivymd.icon_definitions import md_icons
+from kivymd.uix.button import MDIconButton
 
 import websocket
 import threading
 import base64
 from PIL import Image as PILImage
 
-# Define colors to match web version from client.html
-PRIMARY_COLOR = "#2c3e50"
-SECONDARY_COLOR = "#3498db"
-ALERT_COLOR = "#e74c3c"
-BACKGROUND_COLOR = "#ecf0f1"
-TEXT_COLOR = "#2c3e50"
-CARD_BACKGROUND = "#ffffff"
-SUCCESS_COLOR = "#2ecc71"
+# Define dark theme colors
+DARK_PRIMARY = "#1F1F1F"        # Primary background
+DARK_SECONDARY = "#2D2D2D"      # Secondary background (cards)
+DARK_ACCENT = "#2196F3"         # Accent color (buttons, highlights)
+DARK_ERROR = "#CF6679"          # Error color
+DARK_SUCCESS = "#4CAF50"        # Success color
+DARK_WARNING = "#FF9800"        # Warning color
+DARK_TEXT_PRIMARY = "#FFFFFF"   # Primary text
+DARK_TEXT_SECONDARY = "#B0B0B0" # Secondary text
+DARK_DIVIDER = "#424242"        # Dividers
+
+class DarkCard(MDCard):
+    """A card with modern dark styling"""
+    def __init__(self, **kwargs):
+        super(DarkCard, self).__init__(**kwargs)
+        self.md_bg_color = get_color_from_hex(DARK_SECONDARY)
+        self.radius = [dp(8), dp(8), dp(8), dp(8)]
+        self.elevation = 1
+        self.padding = dp(16)
+        self.ripple_behavior = True
+        
+        # Subtle shadows for depth
+        self.shadow_softness = 4
+        self.shadow_offset = (0, 1)
 
 class StatusIndicator(BoxLayout):
     def __init__(self, **kwargs):
         super(StatusIndicator, self).__init__(**kwargs)
         self.orientation = 'horizontal'
         self.size_hint_y = None
-        self.height = dp(30)
-        self.padding = [dp(10), 0]
-        self.spacing = dp(8)
+        self.height = dp(36)
+        self.padding = [dp(16), 0]
+        self.spacing = dp(12)
         
         self.status_dot = BoxLayout()
         self.status_dot.size_hint = (None, None)
-        self.status_dot.size = (dp(12), dp(12))
+        self.status_dot.size = (dp(10), dp(10))
         
         with self.status_dot.canvas:
-            Color(*get_color_from_hex(SUCCESS_COLOR))
+            Color(*get_color_from_hex(DARK_SUCCESS))
             self.dot = Rectangle(pos=self.status_dot.pos, size=self.status_dot.size)
         
-        self.status_text = Label(
-            text="System Active - Monitoring Pool",
-            color=get_color_from_hex("#7f8c8d"),
-            font_size=dp(14),
+        self.status_text = MDLabel(
+            text="System Active",
+            theme_text_color="Custom",
+            text_color=get_color_from_hex(DARK_TEXT_SECONDARY),
+            font_style="Caption",
             size_hint_x=1,
             halign='left',
             valign='middle'
@@ -72,9 +98,9 @@ class StatusIndicator(BoxLayout):
         self.status_dot.canvas.clear()
         with self.status_dot.canvas:
             if connected:
-                Color(*get_color_from_hex(SUCCESS_COLOR))
+                Color(*get_color_from_hex(DARK_SUCCESS))
             else:
-                Color(*get_color_from_hex(ALERT_COLOR))
+                Color(*get_color_from_hex(DARK_ERROR))
             self.dot = Rectangle(pos=self.status_dot.pos, size=self.status_dot.size)
         
         if text:
@@ -89,16 +115,17 @@ class AlertMessage(BoxLayout):
         self.orientation = 'vertical'
         self.size_hint_y = None
         self.height = dp(60)
-        self.padding = [dp(10), dp(5)]
+        self.padding = [dp(8), dp(4)]
         
         with self.canvas.before:
-            Color(*get_color_from_hex(ALERT_COLOR))
-            self.rect = Rectangle(pos=self.pos, size=self.size)
+            Color(*get_color_from_hex(DARK_ERROR))
+            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(4), dp(4), dp(4), dp(4)])
         
-        self.message = Label(
-            text="⚠️ DROWNING DETECTED - IMMEDIATE ACTION REQUIRED",
-            color=(1, 1, 1, 1),
-            font_size=dp(16),
+        self.message = MDLabel(
+            text="DROWNING DETECTED!",  # Removed the warning emoji
+            theme_text_color="Custom",
+            text_color=(1, 1, 1, 1),
+            font_style="H6",
             bold=True,
             halign='center',
             valign='middle'
@@ -144,7 +171,7 @@ class AlertMessage(BoxLayout):
                 pass
     
     def start_pulse_animation(self):
-        anim = Animation(opacity=0.8, duration=0.75) + Animation(opacity=1, duration=0.75)
+        anim = Animation(opacity=0.7, duration=0.5) + Animation(opacity=1, duration=0.5)
         anim.repeat = True
         anim.start(self)
     
@@ -152,119 +179,139 @@ class AlertMessage(BoxLayout):
         Animation.cancel_all(self)
 
 
-class DetectionInfo(BoxLayout):
+class DetectionInfo(ScrollView):
     def __init__(self, **kwargs):
         super(DetectionInfo, self).__init__(**kwargs)
-        self.orientation = 'vertical'
-        self.padding = [dp(10), dp(5)]
-        self.spacing = dp(10)
+        self.size_hint = (1, 1)
+        self.bar_width = dp(4)
+        self.bar_color = get_color_from_hex(DARK_ACCENT)
+        self.bar_inactive_color = get_color_from_hex(DARK_DIVIDER)
+        self.effect_cls = "ScrollEffect"  # Smooth scrolling
+        self.scroll_type = ['bars']
         
-        self.no_detection_label = Label(
-            text="No drowning incidents detected.",
-            color=get_color_from_hex("#7f8c8d"),
-            font_size=dp(14),
+        self.container = BoxLayout(
+            orientation='vertical',
+            size_hint_y=None,
+            spacing=dp(12),
+            padding=[dp(8), dp(8)]
+        )
+        self.container.bind(minimum_height=self.container.setter('height'))
+        
+        self.no_detection_label = MDLabel(
+            text="No drowning incidents detected",
+            theme_text_color="Custom",
+            text_color=get_color_from_hex(DARK_TEXT_SECONDARY),
+            font_style="Body1",
             italic=True,
             halign='center',
-            valign='middle'
+            valign='middle',
+            size_hint_y=None,
+            height=dp(40)
         )
         self.no_detection_label.bind(size=self.no_detection_label.setter('text_size'))
         
-        self.add_widget(self.no_detection_label)
+        self.container.add_widget(self.no_detection_label)
+        self.add_widget(self.container)
     
     def update_detections(self, drowning_boxes=None):
-        self.clear_widgets()
+        self.container.clear_widgets()
         
         if not drowning_boxes or len(drowning_boxes) == 0:
-            self.add_widget(self.no_detection_label)
+            self.container.add_widget(self.no_detection_label)
             return
             
         for i, box in enumerate(drowning_boxes):
-            detection_item = BoxLayout(
+            detection_card = DarkCard(
                 orientation='vertical',
                 size_hint_y=None,
-                height=dp(80),
-                padding=[dp(8), dp(5)]
+                height=dp(100),
+                padding=[dp(12), dp(8)]
             )
             
-            with detection_item.canvas.before:
-                Color(*get_color_from_hex("#EBF5FB"))  # Light blue background
-                Rectangle(pos=detection_item.pos, size=detection_item.size)
-                
-                # Left border
-                Color(*get_color_from_hex(SECONDARY_COLOR))
-                Rectangle(
-                    pos=detection_item.pos,
-                    size=(dp(4), detection_item.height)
-                )
-            
-            detection_label = Label(
-                text=f"Drowning Person #{i+1} Detected",
-                color=get_color_from_hex(TEXT_COLOR),
-                font_size=dp(14),
+            detection_label = MDLabel(
+                text=f"Drowning Person #{i+1}",
+                theme_text_color="Custom",
+                text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
+                font_style="Subtitle1",
+                bold=True,
                 size_hint_y=None,
-                height=dp(20),
-                halign='left'
+                height=dp(30)
             )
-            detection_label.bind(size=detection_label.setter('text_size'))
             
             coordinates = GridLayout(
                 cols=2,
-                spacing=[dp(5), dp(5)],
+                spacing=[dp(8), dp(8)],
                 size_hint_y=None,
-                height=dp(40)
+                height=dp(50),
+                padding=[0, dp(5)]
             )
             
             center_x = box.get('center_x', 0)
             center_y = box.get('center_y', 0)
             
-            x_coord = Label(
+            # Create x coordinate box with proper rectangle reference
+            x_box = BoxLayout(
+                orientation='vertical',
+                size_hint_y=None,
+                height=dp(36)
+            )
+            
+            with x_box.canvas.before:
+                Color(*get_color_from_hex(DARK_ACCENT + "33"))
+                x_rect = Rectangle(pos=x_box.pos, size=x_box.size)
+                x_box.rect = x_rect  # Store reference to rectangle
+            
+            # Safe binding using the stored reference
+            def update_x_rect(instance, value):
+                instance.rect.pos = instance.pos
+                instance.rect.size = instance.size
+            
+            x_box.bind(pos=update_x_rect, size=update_x_rect)
+            
+            x_label = MDLabel(
                 text=f"X: {center_x}",
-                color=(1, 1, 1, 1),
-                size_hint_y=None,
-                height=dp(30),
+                theme_text_color="Custom",
+                text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
                 halign='center',
                 valign='middle'
             )
+            x_box.add_widget(x_label)
             
-            y_coord = Label(
+            # Create y coordinate box with proper rectangle reference
+            y_box = BoxLayout(
+                orientation='vertical',
+                size_hint_y=None,
+                height=dp(36)
+            )
+            
+            with y_box.canvas.before:
+                Color(*get_color_from_hex(DARK_ACCENT + "33"))
+                y_rect = Rectangle(pos=y_box.pos, size=y_box.size)
+                y_box.rect = y_rect  # Store reference to rectangle
+            
+            # Safe binding using the stored reference
+            def update_y_rect(instance, value):
+                instance.rect.pos = instance.pos
+                instance.rect.size = instance.size
+            
+            y_box.bind(pos=update_y_rect, size=update_y_rect)
+            
+            y_label = MDLabel(
                 text=f"Y: {center_y}",
-                color=(1, 1, 1, 1),
-                size_hint_y=None,
-                height=dp(30),
+                theme_text_color="Custom",
+                text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
                 halign='center',
                 valign='middle'
             )
+            y_box.add_widget(y_label)
             
-            with x_coord.canvas.before:
-                Color(*get_color_from_hex(SECONDARY_COLOR))
-                Rectangle(pos=x_coord.pos, size=x_coord.size)
-                
-            with y_coord.canvas.before:
-                Color(*get_color_from_hex(SECONDARY_COLOR))
-                Rectangle(pos=y_coord.pos, size=y_coord.size)
+            coordinates.add_widget(x_box)
+            coordinates.add_widget(y_box)
             
-            coordinates.add_widget(x_coord)
-            coordinates.add_widget(y_coord)
+            detection_card.add_widget(detection_label)
+            detection_card.add_widget(coordinates)
             
-            detection_item.add_widget(detection_label)
-            detection_item.add_widget(coordinates)
-            detection_item.bind(pos=self._update_item_canvas, size=self._update_item_canvas)
-            
-            self.add_widget(detection_item)
-    
-    def _update_item_canvas(self, instance, value):
-        instance.canvas.before.clear()
-        with instance.canvas.before:
-            # Background
-            Color(*get_color_from_hex("#EBF5FB"))
-            Rectangle(pos=instance.pos, size=instance.size)
-            
-            # Left border
-            Color(*get_color_from_hex(SECONDARY_COLOR))
-            Rectangle(
-                pos=instance.pos,
-                size=(dp(4), instance.height)
-            )
+            self.container.add_widget(detection_card)
 
 
 class ConnectionScreen(Screen):
@@ -273,115 +320,132 @@ class ConnectionScreen(Screen):
         
         # Set background color
         with self.canvas.before:
-            Color(*get_color_from_hex(BACKGROUND_COLOR))
+            Color(*get_color_from_hex(DARK_PRIMARY))
             self.rect = Rectangle(size=self.size, pos=self.pos)
         self.bind(size=self._update_rect, pos=self._update_rect)
         
-        main_layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+        main_layout = BoxLayout(
+            orientation='vertical', 
+            padding=[dp(16), dp(32), dp(16), dp(16)],
+            spacing=dp(24)
+        )
         
         # Header
         header = BoxLayout(
             orientation='vertical', 
             size_hint_y=None, 
             height=dp(80),
-            padding=[0, dp(10)]
+            padding=[0, dp(8)]
         )
         
-        title_label = Label(
-            text="AIDRONe Drowning Detection",
-            font_size=dp(24),
-            color=get_color_from_hex(PRIMARY_COLOR),
+        title_label = MDLabel(
+            text="AIDRONe",
+            theme_text_color="Custom",
+            text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
+            font_style="H4",
             bold=True,
             size_hint_y=None,
-            height=dp(40)
+            height=dp(50),
+            halign='center'
         )
         
-        subtitle_label = Label(
-            text="Connect to your AIDRONe device",
-            font_size=dp(16),
-            color=get_color_from_hex("#7f8c8d"),
+        subtitle_label = MDLabel(
+            text="Drowning Detection System",
+            theme_text_color="Custom",
+            text_color=get_color_from_hex(DARK_TEXT_SECONDARY),
+            font_style="Subtitle1",
             size_hint_y=None,
-            height=dp(30)
+            height=dp(30),
+            halign='center'
         )
         
         header.add_widget(title_label)
         header.add_widget(subtitle_label)
         
-        # Connection form
-        form_layout = BoxLayout(orientation='vertical', spacing=dp(15), padding=[0, dp(20)])
-        
-        self.ip_input = TextInput(
-            hint_text="Enter WebSocket URL (e.g., ws://192.168.1.100:8765)",
-            multiline=False,
+        # Connection form in a card
+        form_card = DarkCard(
+            orientation='vertical',
             size_hint=(1, None),
-            height=dp(50),
-            font_size=dp(16),
-            padding=[dp(10), dp(12), 0, 0]
+            height=dp(190),
+            padding=dp(16),
+            spacing=dp(20)
         )
         
-        # Connect button with custom style
-        self.connect_button = Button(
-            text="Connect",
+        self.ip_input = MDTextField(
+            hint_text="Enter WebSocket URL",
+            mode="rectangle",
+            line_color_normal=get_color_from_hex(DARK_DIVIDER),
+            line_color_focus=get_color_from_hex(DARK_ACCENT),
+            text_color_normal=get_color_from_hex(DARK_TEXT_PRIMARY),
+            text_color_focus=get_color_from_hex(DARK_TEXT_PRIMARY),
+            hint_text_color_normal=get_color_from_hex(DARK_TEXT_SECONDARY),
+            hint_text_color_focus=get_color_from_hex(DARK_ACCENT),
             size_hint=(1, None),
-            height=dp(50),
-            background_normal='',
-            background_color=get_color_from_hex(SECONDARY_COLOR),
-            color=(1, 1, 1, 1),
-            font_size=dp(18),
-            bold=True
+            height=dp(48),
+            helper_text="Example: ws://192.168.1.100:8765",
+            helper_text_mode="on_focus"
+        )
+        
+        # Connect button (positioned for thumb access)
+        self.connect_button = MDRaisedButton(
+            text="CONNECT",
+            md_bg_color=get_color_from_hex(DARK_ACCENT),
+            size_hint=(1, None),
+            height=dp(56),
+            pos_hint={"center_x": 0.5},
+            font_style="Button"
         )
         self.connect_button.bind(on_press=self.connect_to_websocket)
         
         # Connection status
-        self.status_label = Label(
+        self.status_label = MDLabel(
             text="",
-            color=get_color_from_hex("#7f8c8d"),
+            theme_text_color="Custom",
+            text_color=get_color_from_hex(DARK_TEXT_SECONDARY),
+            font_style="Caption",
             size_hint_y=None,
-            height=dp(30),
+            height=dp(24),
             halign='center'
         )
-        self.status_label.bind(size=self.status_label.setter('text_size'))
         
-        # About section
-        about_layout = BoxLayout(
-            orientation='vertical', 
-            size_hint_y=None, 
-            height=dp(60),
-            padding=[dp(10), dp(10)]
-        )
+        form_card.add_widget(self.ip_input)
+        form_card.add_widget(self.connect_button)
+        form_card.add_widget(self.status_label)
         
-        about_label = Label(
-            text="AIDRONe uses advanced AI to detect drowning incidents\nand send immediate alerts.",
-            font_size=dp(14),
-            color=get_color_from_hex("#7f8c8d"),
-            halign='center'
+        # Simple about text
+        about_label = MDLabel(
+            text="AIDRONe uses AI to detect drowning incidents and sends immediate alerts.",
+            theme_text_color="Custom",
+            text_color=get_color_from_hex(DARK_TEXT_SECONDARY),
+            font_style="Body2",
+            halign='center',
+            size_hint_y=None,
+            height=dp(60)
         )
         about_label.bind(size=about_label.setter('text_size'))
         
-        about_layout.add_widget(about_label)
-        
         # Add all layouts to main layout
         main_layout.add_widget(header)
-        main_layout.add_widget(form_layout)
-        
-        form_layout.add_widget(self.ip_input)
-        form_layout.add_widget(self.connect_button)
-        form_layout.add_widget(self.status_label)
-        
-        main_layout.add_widget(about_layout)
+        main_layout.add_widget(form_card)
+        main_layout.add_widget(about_label)
+        main_layout.add_widget(Label(size_hint_y=1))  # Spacer
         
         # Footer
         footer = BoxLayout(
             orientation='vertical',
             size_hint_y=None,
             height=dp(40),
-            padding=[0, dp(10)]
+            padding=[0, dp(8)]
         )
         
-        footer_label = Label(
-            text="© 2025 Quantum Bits FLL - Drowning Detection System",
-            font_size=dp(12),
-            color=get_color_from_hex("#7f8c8d")
+        footer_label = MDLabel(
+            text="© 2025 Quantum Bits FLL",
+            theme_text_color="Custom",
+            text_color=get_color_from_hex(DARK_TEXT_SECONDARY),
+            font_style="Caption",
+            halign='center',
+            size_hint_y=None,
+            height=dp(20)
         )
         
         footer.add_widget(footer_label)
@@ -394,16 +458,22 @@ class ConnectionScreen(Screen):
         self.rect.size = instance.size
     
     def connect_to_websocket(self, instance):
+        # Provide feedback that button was pressed
+        anim = Animation(md_bg_color=get_color_from_hex(DARK_SUCCESS), duration=0.1) + \
+               Animation(md_bg_color=get_color_from_hex(DARK_ACCENT), duration=0.1)
+        anim.start(self.connect_button)
+        
         ip_address = self.ip_input.text.strip()
         if not ip_address:
-            ip_address = "ws://localhost:8765"  # Default from client.html
+            ip_address = "ws://localhost:8765"  # Default
         
         # Show connecting status
-        self.status_label.text = "Connecting to AIDRONe system..."
-        self.status_label.color = get_color_from_hex("#7f8c8d")
+        self.status_label.text = "Connecting..."
+        self.status_label.theme_text_color = "Custom"
+        self.status_label.text_color = get_color_from_hex(DARK_TEXT_SECONDARY)
         self.connect_button.disabled = True
         
-        app = App.get_running_app()
+        app = MDApp.get_running_app()
         app.websocket_url = ip_address
         app.connect_to_websocket(
             on_success=self.on_connection_success,
@@ -411,14 +481,22 @@ class ConnectionScreen(Screen):
         )
     
     def on_connection_success(self):
-        self.status_label.text = "Connected! Waiting for alarms..."
-        self.status_label.color = get_color_from_hex(SUCCESS_COLOR)
-        # Don't transition yet - wait for alarm
+        self.status_label.text = "Connected successfully"
+        self.status_label.text_color = get_color_from_hex(DARK_SUCCESS)
+        
+        # Visual feedback of success
+        anim = Animation(md_bg_color=get_color_from_hex(DARK_SUCCESS), duration=0.3)
+        anim.start(self.connect_button)
     
     def on_connection_error(self, error_msg):
-        self.status_label.text = f"Connection error: {error_msg}"
-        self.status_label.color = get_color_from_hex(ALERT_COLOR)
+        self.status_label.text = f"Connection failed"
+        self.status_label.text_color = get_color_from_hex(DARK_ERROR)
         self.connect_button.disabled = False
+        
+        # Visual feedback of error
+        anim = Animation(md_bg_color=get_color_from_hex(DARK_ERROR), duration=0.3) + \
+               Animation(md_bg_color=get_color_from_hex(DARK_ACCENT), duration=0.3)
+        anim.start(self.connect_button)
 
 
 class WaitingScreen(Screen):
@@ -427,89 +505,90 @@ class WaitingScreen(Screen):
         
         # Set background color
         with self.canvas.before:
-            Color(*get_color_from_hex(BACKGROUND_COLOR))
+            Color(*get_color_from_hex(DARK_PRIMARY))
             self.rect = Rectangle(size=self.size, pos=self.pos)
         self.bind(size=self._update_rect, pos=self._update_rect)
         
-        main_layout = BoxLayout(orientation='vertical', padding=dp(20), spacing=dp(15))
+        # Use a single layout without top bar
+        main_layout = BoxLayout(
+            orientation='vertical',
+            padding=[dp(16), dp(24), dp(16), dp(16)],
+            spacing=dp(16)
+        )
         
-        # Header
-        title_label = Label(
-            text="AIDRONe Standby Mode",
-            font_size=dp(24),
-            color=get_color_from_hex(PRIMARY_COLOR),
+        # Title label to replace header bar
+        title_label = MDLabel(
+            text="Monitoring",
+            theme_text_color="Custom",
+            text_color=get_color_from_hex(DARK_ACCENT),
+            font_style="H6",
             bold=True,
             size_hint_y=None,
-            height=dp(60)
+            height=dp(40),
+            halign='left'
         )
         
-        # Status indicator
+        # Status indicator (now at the top with more prominence)
         self.status_indicator = StatusIndicator(
             size_hint_y=None,
-            height=dp(30)
+            height=dp(36)
         )
-        self.status_indicator.update_status(True, "Connected - Waiting for alerts")
+        self.status_indicator.update_status(True, "Connected - Monitoring")
         
-        # Waiting message
-        waiting_container = BoxLayout(
+        # Waiting message in card
+        waiting_card = DarkCard(
             orientation='vertical',
             padding=dp(20),
             size_hint_y=None,
-            height=dp(200)
+            height=dp(180)
         )
         
-        with waiting_container.canvas.before:
-            Color(*get_color_from_hex(CARD_BACKGROUND))
-            self.waiting_rect = Rectangle(size=waiting_container.size, pos=waiting_container.pos)
-        waiting_container.bind(size=self._update_waiting_rect, pos=self._update_waiting_rect)
-        
-        waiting_icon = Label(
-            text="🔍",
-            font_size=dp(48),
-            size_hint_y=None,
-            height=dp(60)
+        waiting_icon = MDIconButton(
+            icon="magnify",
+            icon_size=dp(48),
+            pos_hint={"center_x": 0.5},
+            theme_text_color="Custom",
+            text_color=get_color_from_hex(DARK_TEXT_PRIMARY)
         )
         
-        waiting_text = Label(
-            text="Monitoring Pool for Drowning Incidents",
-            font_size=dp(18),
-            color=get_color_from_hex(PRIMARY_COLOR),
+        waiting_text = MDLabel(
+            text="Monitoring for Drowning",
+            theme_text_color="Custom",
+            text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
+            font_style="H5",
             size_hint_y=None,
             height=dp(40),
             halign='center'
         )
-        waiting_text.bind(size=waiting_text.setter('text_size'))
         
-        waiting_subtext = Label(
+        waiting_subtext = MDLabel(
             text="You'll be alerted immediately when drowning is detected",
-            font_size=dp(14),
-            color=get_color_from_hex("#7f8c8d"),
+            theme_text_color="Custom",
+            text_color=get_color_from_hex(DARK_TEXT_SECONDARY),
+            font_style="Body2",
             size_hint_y=None,
             height=dp(60),
             halign='center'
         )
-        waiting_subtext.bind(size=waiting_subtext.setter('text_size'))
         
-        waiting_container.add_widget(waiting_icon)
-        waiting_container.add_widget(waiting_text)
-        waiting_container.add_widget(waiting_subtext)
+        waiting_card.add_widget(waiting_icon)
+        waiting_card.add_widget(waiting_text)
+        waiting_card.add_widget(waiting_subtext)
         
-        # Disconnect button
-        disconnect_button = Button(
-            text="Disconnect",
-            size_hint=(1, None),
-            height=dp(50),
-            background_normal='',
-            background_color=get_color_from_hex(ALERT_COLOR),
-            color=(1, 1, 1, 1)
-        )
-        disconnect_button.bind(on_press=self.disconnect)
-        
-        # Add everything to main layout
+        # Add components to main layout
         main_layout.add_widget(title_label)
         main_layout.add_widget(self.status_indicator)
-        main_layout.add_widget(waiting_container)
+        main_layout.add_widget(waiting_card)
         main_layout.add_widget(Label(size_hint_y=1))  # Spacer
+        
+        # Disconnect button (positioned at bottom for thumb access)
+        disconnect_button = MDRaisedButton(
+            text="DISCONNECT",
+            md_bg_color=get_color_from_hex(DARK_ERROR),
+            size_hint=(1, None),
+            height=dp(56)
+        )
+        disconnect_button.bind(on_press=self.disconnect)
         main_layout.add_widget(disconnect_button)
         
         self.add_widget(main_layout)
@@ -518,14 +597,15 @@ class WaitingScreen(Screen):
         self.rect.pos = instance.pos
         self.rect.size = instance.size
     
-    def _update_waiting_rect(self, instance, value):
-        self.waiting_rect.pos = instance.pos
-        self.waiting_rect.size = instance.size
-    
     def disconnect(self, instance):
-        app = App.get_running_app()
+        # Animation feedback
+        anim = Animation(md_bg_color=get_color_from_hex("#D32F2F"), duration=0.1) + \
+               Animation(md_bg_color=get_color_from_hex(DARK_ERROR), duration=0.1)
+        anim.start(instance)
+        
+        app = MDApp.get_running_app()
         app.stop_websocket()
-        app.root.transition = SlideTransition(direction='right')
+        app.root.transition = FadeTransition(duration=0.2)
         app.root.current = "connection_screen"
 
 
@@ -535,148 +615,119 @@ class VideoScreen(Screen):
         
         # Set background color
         with self.canvas.before:
-            Color(*get_color_from_hex(BACKGROUND_COLOR))
+            Color(*get_color_from_hex(DARK_PRIMARY))
             self.rect = Rectangle(size=self.size, pos=self.pos)
         self.bind(size=self._update_rect, pos=self._update_rect)
         
-        main_layout = BoxLayout(orientation='vertical', padding=dp(10), spacing=dp(10))
+        main_layout = BoxLayout(orientation='vertical', padding=0, spacing=0)
         
-        # Header
-        header = BoxLayout(
-            orientation='horizontal',
-            size_hint_y=None,
-            height=dp(50),
-            padding=[dp(10), 0]
+        # Top bar with alarm indication
+        top_bar = MDTopAppBar(
+            title="Drowning Alert",
+            right_action_items=[["close", lambda x: self.dismiss_alert()]],
+            md_bg_color=get_color_from_hex(DARK_ERROR),
+            specific_text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
+            elevation=0
         )
         
-        title_label = Label(
-            text="Drowning Detection System",
-            font_size=dp(18),
-            color=get_color_from_hex(PRIMARY_COLOR),
-            bold=True,
-            size_hint_x=0.7,
-            halign='left'
+        # Content area
+        content_area = BoxLayout(
+            orientation='vertical',
+            padding=[dp(8), dp(8)],
+            spacing=dp(8)
         )
-        title_label.bind(size=title_label.setter('text_size'))
-        
-        # Action buttons
-        dismiss_button = Button(
-            text="Dismiss Alert",
-            size_hint=(None, None),
-            size=(dp(120), dp(40)),
-            background_normal='',
-            background_color=get_color_from_hex(SECONDARY_COLOR),
-            color=(1, 1, 1, 1)
-        )
-        dismiss_button.bind(on_press=self.dismiss_alert)
-        
-        header.add_widget(title_label)
-        header.add_widget(dismiss_button)
         
         # Status indicator
         self.status_indicator = StatusIndicator(
             size_hint_y=None,
-            height=dp(30)
+            height=dp(36)
         )
         
-        # Video container
-        video_container = BoxLayout(
+        # Video card
+        video_card = DarkCard(
             orientation='vertical',
-            padding=dp(10),
-            spacing=0
+            padding=dp(4),
+            size_hint_y=0.45
         )
-        
-        with video_container.canvas.before:
-            Color(*get_color_from_hex(CARD_BACKGROUND))
-            self.video_rect = Rectangle(size=video_container.size, pos=video_container.pos)
-        video_container.bind(size=self._update_video_rect, pos=self._update_video_rect)
         
         self.image = Image(allow_stretch=True, keep_ratio=True)
-        video_container.add_widget(self.image)
-        
-        # Alert panel
-        alert_panel = BoxLayout(
-            orientation='vertical',
-            size_hint_y=None,
-            height=dp(250),
-            padding=0
-        )
-        
-        with alert_panel.canvas.before:
-            Color(*get_color_from_hex(CARD_BACKGROUND))
-            self.alert_rect = Rectangle(size=alert_panel.size, pos=alert_panel.pos)
-        alert_panel.bind(size=self._update_alert_rect, pos=self._update_alert_rect)
-        
-        # Alert header
-        alert_header = BoxLayout(
-            orientation='horizontal',
-            size_hint_y=None,
-            height=dp(40),
-            padding=[dp(10), 0]
-        )
-        
-        with alert_header.canvas.before:
-            Color(*get_color_from_hex(PRIMARY_COLOR))
-            self.header_rect = Rectangle(size=alert_header.size, pos=alert_header.pos)
-        alert_header.bind(size=self._update_header_rect, pos=self._update_header_rect)
-        
-        header_label = Label(
-            text="📊 Detection Status",
-            font_size=dp(16),
-            color=(1, 1, 1, 1)
-        )
-        alert_header.add_widget(header_label)
-        
-        # Alert content
-        alert_content = BoxLayout(orientation='vertical', padding=0)
+        video_card.add_widget(self.image)
         
         # Alert message
         self.alert_message = AlertMessage()
         
-        # Detection info
-        self.detection_info = DetectionInfo()
+        # Detection info panel
+        detection_panel = DarkCard(
+            orientation='vertical',
+            size_hint_y=0.55 - (dp(36) / Window.height) - (dp(80) / Window.height),
+            padding=0
+        )
         
-        alert_content.add_widget(self.alert_message)
-        alert_content.add_widget(self.detection_info)
-        
-        alert_panel.add_widget(alert_header)
-        alert_panel.add_widget(alert_content)
-        
-        # Action buttons at bottom
-        action_buttons = BoxLayout(
+        # Detection header
+        detection_header = BoxLayout(
             orientation='horizontal',
             size_hint_y=None,
             height=dp(50),
-            spacing=dp(10),
-            padding=[dp(10), dp(5)]
+            padding=[dp(16), 0]
         )
         
-        disconnect_button = Button(
-            text="Disconnect",
-            size_hint_x=0.5,
-            background_normal='',
-            background_color=get_color_from_hex(ALERT_COLOR),
-            color=(1, 1, 1, 1)
-        )
-        disconnect_button.bind(on_press=self.disconnect)
+        with detection_header.canvas.before:
+            Color(*get_color_from_hex(DARK_ACCENT))
+            self.header_rect = Rectangle(size=detection_header.size, pos=detection_header.pos)
+        detection_header.bind(size=self._update_header_rect, pos=self._update_header_rect)
         
-        back_to_standby_button = Button(
-            text="Back to Standby",
+        header_label = MDLabel(
+            text="Detection Details",
+            theme_text_color="Custom",
+            text_color=(1, 1, 1, 1),
+            font_style="Subtitle1",
+            bold=True
+        )
+        detection_header.add_widget(header_label)
+        
+        # Detection content
+        self.detection_info = DetectionInfo()
+        
+        detection_panel.add_widget(detection_header)
+        detection_panel.add_widget(self.detection_info)
+        
+        # Add to content area
+        content_area.add_widget(self.status_indicator)
+        content_area.add_widget(self.alert_message)
+        content_area.add_widget(video_card)
+        content_area.add_widget(detection_panel)
+        
+        # Bottom action buttons
+        action_buttons = BoxLayout(
+            orientation='horizontal',
+            size_hint_y=None,
+            height=dp(80),
+            spacing=dp(12),
+            padding=[dp(16), dp(16)]
+        )
+        
+        back_to_standby_button = MDRaisedButton(
+            text="BACK",
+            md_bg_color=get_color_from_hex(DARK_SECONDARY),
             size_hint_x=0.5,
-            background_normal='',
-            background_color=get_color_from_hex("#7f8c8d"),
-            color=(1, 1, 1, 1)
+            height=dp(56)
         )
         back_to_standby_button.bind(on_press=self.back_to_standby)
+        
+        disconnect_button = MDRaisedButton(
+            text="DISCONNECT",
+            md_bg_color=get_color_from_hex(DARK_ERROR),
+            size_hint_x=0.5,
+            height=dp(56)
+        )
+        disconnect_button.bind(on_press=self.disconnect)
         
         action_buttons.add_widget(back_to_standby_button)
         action_buttons.add_widget(disconnect_button)
         
         # Add all layouts to main layout
-        main_layout.add_widget(header)
-        main_layout.add_widget(self.status_indicator)
-        main_layout.add_widget(video_container)
-        main_layout.add_widget(alert_panel)
+        main_layout.add_widget(top_bar)
+        main_layout.add_widget(content_area)
         main_layout.add_widget(action_buttons)
         
         self.add_widget(main_layout)
@@ -685,35 +736,42 @@ class VideoScreen(Screen):
         self.rect.pos = instance.pos
         self.rect.size = instance.size
     
-    def _update_video_rect(self, instance, value):
-        self.video_rect.pos = instance.pos
-        self.video_rect.size = instance.size
-    
-    def _update_alert_rect(self, instance, value):
-        self.alert_rect.pos = instance.pos
-        self.alert_rect.size = instance.size
-    
     def _update_header_rect(self, instance, value):
         self.header_rect.pos = instance.pos
         self.header_rect.size = instance.size
     
     def disconnect(self, instance):
-        app = App.get_running_app()
+        # Haptic feedback if available
+        try:
+            from jnius import autoclass
+            vibrator = autoclass('android.os.Vibrator')
+            activity = autoclass('org.kivy.android.PythonActivity').mActivity
+            vibrator = activity.getSystemService(activity.VIBRATOR_SERVICE)
+            vibrator.vibrate(50)  # 50ms vibration
+        except:
+            pass
+            
+        app = MDApp.get_running_app()
         app.stop_websocket()
-        app.root.transition = SlideTransition(direction='right')
+        app.root.transition = FadeTransition(duration=0.2)
         app.root.current = "connection_screen"
     
     def back_to_standby(self, instance):
-        app = App.get_running_app()
-        app.root.transition = SlideTransition(direction='right')
+        # Animation feedback
+        anim = Animation(md_bg_color=get_color_from_hex("#757575"), duration=0.1) + \
+               Animation(md_bg_color=get_color_from_hex(DARK_SECONDARY), duration=0.1)
+        anim.start(instance)
+        
+        app = MDApp.get_running_app()
+        app.root.transition = FadeTransition(duration=0.2)
         app.root.current = "waiting_screen"
         self.alert_message.hide()
     
-    def dismiss_alert(self, instance):
+    def dismiss_alert(self):
         # Hide the alert message and update detection info
         self.alert_message.hide()
         self.detection_info.update_detections(None)
-        self.status_indicator.update_status(True, "Alert Dismissed - Monitoring Pool")
+        self.status_indicator.update_status(True, "Alert Dismissed - Monitoring")
     
     def update_status(self, status, connected=True):
         self.status_indicator.update_status(connected=connected, text=status)
@@ -758,20 +816,25 @@ class VideoScreen(Screen):
         else:
             self.alert_message.hide()
             self.detection_info.update_detections(None)
-            self.status_indicator.update_status(True, "System Active - Monitoring Pool")
+            self.status_indicator.update_status(True, "System Active - Monitoring")
 
 
-class AIDRONeApp(App):
+class AIDRONeApp(MDApp):
     def build(self):
-        self.title = "AIDRONe Drowning Detection"
+        # Set app theme to dark
+        self.theme_cls.theme_style = "Dark"
+        self.theme_cls.primary_palette = "BlueGray"
+        self.theme_cls.accent_palette = "Blue"
+        
+        self.title = "AIDRONe"
         self.websocket = None
         self.websocket_url = ""
         self.websocket_thread = None
         self.is_running = False
         self.connection_callbacks = {}
         
-        # Create screen manager
-        self.sm = ScreenManager()
+        # Create screen manager with smooth transitions
+        self.sm = ScreenManager(transition=FadeTransition(duration=0.2))
         self.connection_screen = ConnectionScreen(name="connection_screen")
         self.waiting_screen = WaitingScreen(name="waiting_screen")
         self.video_screen = VideoScreen(name="video_screen")
@@ -787,7 +850,7 @@ class AIDRONeApp(App):
     
     def _set_theme_colors(self):
         try:
-            # Set status bar color on Android
+            # Set status bar color on Android with dark theme
             from jnius import autoclass
             activity = autoclass('org.kivy.android.PythonActivity').mActivity
             window = activity.getWindow()
@@ -797,11 +860,11 @@ class AIDRONeApp(App):
                 hex_color = hex_color.lstrip('#')
                 return int(hex_color, 16) | 0xFF000000
             
-            window.setStatusBarColor(hex_to_int_color(PRIMARY_COLOR))
-            window.setNavigationBarColor(hex_to_int_color(PRIMARY_COLOR))
+            window.setStatusBarColor(hex_to_int_color(DARK_PRIMARY))
+            window.setNavigationBarColor(hex_to_int_color(DARK_PRIMARY))
         except Exception as e:
             print(f"Could not set theme colors: {e}")
-            
+    
     def connect_to_websocket(self, on_success=None, on_error=None):
         self.connection_callbacks = {
             'on_success': on_success,
@@ -921,7 +984,7 @@ class AIDRONeApp(App):
             # Add ping_interval and ping_timeout
             self.websocket.run_forever(
                 ping_interval=10,  # Send ping every 10 seconds
-                ping_timeout=5,   # Wait 5 seconds for pong response
+                ping_timeout=5,    # Wait 5 seconds for pong response
                 sslopt={"cert_reqs": ssl.CERT_NONE},
                 skip_utf8_validation=True  # Skip UTF-8 validation for better performance
             )
@@ -931,18 +994,19 @@ class AIDRONeApp(App):
             import traceback
             traceback.print_exc()
             if self.connection_callbacks.get('on_error'):
+                error_message = str(e)  # Capture the error message outside the lambda
                 Clock.schedule_once(
-                    lambda dt: self.connection_callbacks['on_error'](str(e)), 
+                    lambda dt, error=error_message: self.connection_callbacks['on_error'](error),
                     0
                 )
             self.is_running = False
     
     def show_waiting_screen(self):
-        self.sm.transition = SlideTransition(direction='left')
+        self.sm.transition = FadeTransition(duration=0.2)
         self.sm.current = "waiting_screen"
     
     def show_video_screen(self):
-        self.sm.transition = SlideTransition(direction='left')
+        self.sm.transition = FadeTransition(duration=0.2)
         self.sm.current = "video_screen"
         self.video_screen.update_status("ALERT: Drowning Detected!", connected=False)
     
