@@ -2,7 +2,6 @@ kivy
 kivymd
 pyjnius
 javac-parser
-websocket
 websocket-client
 python-for-android
 cython
