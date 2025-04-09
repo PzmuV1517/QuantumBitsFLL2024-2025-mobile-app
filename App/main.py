@@ -826,7 +826,29 @@ class AIDRONeApp(MDApp):
         self.theme_cls.primary_palette = "BlueGray"
         self.theme_cls.accent_palette = "Blue"
         
-        self.title = "AIDRONe"
+        # Hide the title bar/action bar on Android and other platforms
+        self.title = ""  # Empty title
+        Window.borderless = True  # Remove window border on desktop
+        
+        # Additional Android-specific title bar hiding
+        try:
+            from android.runnable import run_on_ui_thread
+            from jnius import autoclass
+            
+            activity = autoclass('org.kivy.android.PythonActivity').mActivity
+            View = autoclass('android.view.View')
+            
+            @run_on_ui_thread
+            def hide_status_bar(activity):
+                decorView = activity.getWindow().getDecorView()
+                uiOptions = View.SYSTEM_UI_FLAG_FULLSCREEN
+                decorView.setSystemUiVisibility(uiOptions)
+            
+            hide_status_bar(activity)
+        except ImportError:
+            # Not on Android, no need for this specific code
+            pass
+        
         self.websocket = None
         self.websocket_url = ""
         self.websocket_thread = None
