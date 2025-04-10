@@ -17,6 +17,12 @@ from kivy.core.window import Window
 from kivy.animation import Animation
 from kivy.uix.scrollview import ScrollView
 
+# Add these imports at the top with other imports
+from kivy.animation import Animation
+from kivy.uix.widget import Widget
+from kivy.clock import Clock
+from functools import partial
+
 # KivyMD imports
 from kivymd.app import MDApp
 from kivymd.uix.button import MDRaisedButton, MDFlatButton, MDIconButton, MDRectangleFlatIconButton
@@ -57,6 +63,50 @@ class DarkCard(MDCard):
         self.shadow_softness = 4
         self.shadow_offset = (0, 1)
 
+# Add this new class after DarkCard class:
+
+class AnimatedCard(DarkCard):
+    """Card with entrance and exit animations"""
+    
+    def __init__(self, **kwargs):
+        self.animation_delay = kwargs.pop('animation_delay', 0)
+        self.entrance_animation = kwargs.pop('entrance_animation', 'fade')
+        super(AnimatedCard, self).__init__(**kwargs)
+        self.opacity = 0  # Start invisible
+        
+    def on_parent(self, widget, parent):
+        """Triggered when added to a parent widget"""
+        if parent:
+            # Schedule the entrance animation with the specified delay
+            Clock.schedule_once(self.play_entrance_animation, self.animation_delay)
+    
+    def play_entrance_animation(self, dt):
+        """Play the entrance animation"""
+        if self.entrance_animation == 'fade':
+            anim = Animation(opacity=0, duration=0) + Animation(opacity=1, duration=0.3)
+        elif self.entrance_animation == 'rise':
+            self.y -= dp(20)  # Start below final position
+            anim = (Animation(opacity=0, duration=0) + 
+                    Animation(opacity=1, y=self.y + dp(20), duration=0.3, 
+                              transition='out_back'))
+        elif self.entrance_animation == 'zoom':
+            # Use size_hint for scaling instead of scale property
+            self.size_hint = (0.9, 0.9)
+            anim = (Animation(opacity=0, duration=0) + 
+                    Animation(opacity=1, size_hint=(1.0, 1.0), duration=0.3, 
+                              transition='out_quad'))
+        else:  # Default
+            anim = Animation(opacity=1, duration=0.3)
+            
+        anim.start(self)
+        
+    def animate_out(self, callback=None):
+        """Play an exit animation and then call callback"""
+        anim = Animation(opacity=0, duration=0.2)
+        if callback:
+            anim.bind(on_complete=lambda *args: callback())
+        anim.start(self)
+
 class StatusIndicator(BoxLayout):
     def __init__(self, **kwargs):
         super(StatusIndicator, self).__init__(**kwargs)
@@ -95,17 +145,62 @@ class StatusIndicator(BoxLayout):
         self.dot.pos = self.status_dot.pos
     
     def update_status(self, connected=True, text=None):
+        """Animated status update"""
+        # Animate the status dot
+        target_color = get_color_from_hex(DARK_SUCCESS if connected else DARK_ERROR)
+        
+        # Store previous color before clearing the canvas
+        prev_color = self.status_dot.canvas.get_group('status_color')
+        
         self.status_dot.canvas.clear()
         with self.status_dot.canvas:
-            if connected:
-                Color(*get_color_from_hex(DARK_SUCCESS))
-            else:
-                Color(*get_color_from_hex(DARK_ERROR))
+            Color(*target_color, group='status_color')
             self.dot = Rectangle(pos=self.status_dot.pos, size=self.status_dot.size)
         
-        if text:
+        # Animate size pulse
+        dot_anim = (Animation(size=(dp(14), dp(14)), duration=0.15) + 
+                    Animation(size=(dp(10), dp(10)), duration=0.15))
+        dot_anim.start(self.status_dot)
+        
+        # Text fade animation if text changed
+        if text and text != self.status_text.text:
+            self.status_text.opacity = 0
             self.status_text.text = text
+            text_anim = Animation(opacity=1, duration=0.3)
+            text_anim.start(self.status_text)
 
+# Create an enhanced button class, add this after StatusIndicator class:
+
+class AnimatedButton(MDRaisedButton):
+    """Button with enhanced animation feedback"""
+    
+    def __init__(self, **kwargs):
+        super(AnimatedButton, self).__init__(**kwargs)
+        self.animation_type = kwargs.get('animation_type', 'pulse')
+        
+    def on_press(self):
+        """Enhanced press animation"""
+        super(AnimatedButton, self).on_press()
+        
+        if self.animation_type == 'pulse':
+            # Quick scale down and up
+            anim = (Animation(size_hint_y=0.95, duration=0.1) + 
+                   Animation(size_hint_y=1.0, duration=0.1))
+            anim.start(self)
+        elif self.animation_type == 'color':
+            # Original color
+            original_color = self.md_bg_color
+            
+            # Flash lighter then back to original
+            highlight = self.get_highlight_color(original_color)
+            anim = (Animation(md_bg_color=highlight, duration=0.1) + 
+                   Animation(md_bg_color=original_color, duration=0.2))
+            anim.start(self)
+    
+    def get_highlight_color(self, color):
+        """Create a lighter version of the given color"""
+        r, g, b, a = color
+        return [min(r + 0.1, 1), min(g + 0.1, 1), min(b + 0.1, 1), a]
 
 class AlertMessage(BoxLayout):
     visible = BooleanProperty(False)
@@ -143,8 +238,21 @@ class AlertMessage(BoxLayout):
     def show(self):
         if not self.visible:
             self.visible = True
-            self.opacity = 1
-            self.start_pulse_animation()
+            self.height = 0  # Start with zero height
+            
+            # First grow the height
+            height_anim = Animation(height=dp(60), duration=0.3, transition='out_quad')
+            
+            # Then fade in and start pulsing
+            def after_height(*args):
+                self.opacity = 0
+                fade_anim = Animation(opacity=1, duration=0.2)
+                fade_anim.bind(on_complete=lambda *args: self.start_pulse_animation())
+                fade_anim.start(self)
+                
+            height_anim.bind(on_complete=after_height)
+            height_anim.start(self)
+            
             # Try to vibrate the phone
             try:
                 from jnius import autoclass
@@ -171,9 +279,17 @@ class AlertMessage(BoxLayout):
                 pass
     
     def start_pulse_animation(self):
-        anim = Animation(opacity=0.7, duration=0.5) + Animation(opacity=1, duration=0.5)
+        # Attention-grabbing pulse animation for opacity
+        anim = (Animation(opacity=1, duration=0.4) + 
+                Animation(opacity=0.7, duration=0.4))
         anim.repeat = True
         anim.start(self)
+        
+        # Use size_hint for subtle "scaling" effect instead of scale property
+        size_anim = (Animation(size_hint=(1.02, 1.02), duration=0.4) + 
+                    Animation(size_hint=(1.0, 1.0), duration=0.4))
+        size_anim.repeat = True
+        size_anim.start(self.message)
     
     def stop_pulse_animation(self):
         Animation.cancel_all(self)
@@ -214,104 +330,127 @@ class DetectionInfo(ScrollView):
         self.add_widget(self.container)
     
     def update_detections(self, drowning_boxes=None):
-        self.container.clear_widgets()
+        # First fade out existing content
+        fade_out = Animation(opacity=0, duration=0.15)
         
-        if not drowning_boxes or len(drowning_boxes) == 0:
-            self.container.add_widget(self.no_detection_label)
-            return
+        def add_new_content(*args):
+            self.container.clear_widgets()
+            self.container.opacity = 1  # Reset opacity
             
-        for i, box in enumerate(drowning_boxes):
-            detection_card = DarkCard(
-                orientation='vertical',
-                size_hint_y=None,
-                height=dp(100),
-                padding=[dp(12), dp(8)]
-            )
-            
-            detection_label = MDLabel(
-                text=f"Drowning Person #{i+1}",
-                theme_text_color="Custom",
-                text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
-                font_style="Subtitle1",
-                bold=True,
-                size_hint_y=None,
-                height=dp(30)
-            )
-            
-            coordinates = GridLayout(
-                cols=2,
-                spacing=[dp(8), dp(8)],
-                size_hint_y=None,
-                height=dp(50),
-                padding=[0, dp(5)]
-            )
-            
-            center_x = box.get('center_x', 0)
-            center_y = box.get('center_y', 0)
-            
-            # Create x coordinate box with proper rectangle reference
-            x_box = BoxLayout(
-                orientation='vertical',
-                size_hint_y=None,
-                height=dp(36)
-            )
-            
-            with x_box.canvas.before:
-                Color(*get_color_from_hex(DARK_ACCENT + "33"))
-                x_rect = Rectangle(pos=x_box.pos, size=x_box.size)
-                x_box.rect = x_rect  # Store reference to rectangle
-            
-            # Safe binding using the stored reference
-            def update_x_rect(instance, value):
-                instance.rect.pos = instance.pos
-                instance.rect.size = instance.size
-            
-            x_box.bind(pos=update_x_rect, size=update_x_rect)
-            
-            x_label = MDLabel(
-                text=f"X: {center_x}",
-                theme_text_color="Custom",
-                text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
-                halign='center',
-                valign='middle'
-            )
-            x_box.add_widget(x_label)
-            
-            # Create y coordinate box with proper rectangle reference
-            y_box = BoxLayout(
-                orientation='vertical',
-                size_hint_y=None,
-                height=dp(36)
-            )
-            
-            with y_box.canvas.before:
-                Color(*get_color_from_hex(DARK_ACCENT + "33"))
-                y_rect = Rectangle(pos=y_box.pos, size=y_box.size)
-                y_box.rect = y_rect  # Store reference to rectangle
-            
-            # Safe binding using the stored reference
-            def update_y_rect(instance, value):
-                instance.rect.pos = instance.pos
-                instance.rect.size = instance.size
-            
-            y_box.bind(pos=update_y_rect, size=update_y_rect)
-            
-            y_label = MDLabel(
-                text=f"Y: {center_y}",
-                theme_text_color="Custom",
-                text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
-                halign='center',
-                valign='middle'
-            )
-            y_box.add_widget(y_label)
-            
-            coordinates.add_widget(x_box)
-            coordinates.add_widget(y_box)
-            
-            detection_card.add_widget(detection_label)
-            detection_card.add_widget(coordinates)
-            
-            self.container.add_widget(detection_card)
+            if not drowning_boxes or len(drowning_boxes) == 0:
+                self.container.add_widget(self.no_detection_label)
+                # Animate the no detection label
+                self.no_detection_label.opacity = 0
+                anim = Animation(opacity=1, duration=0.3)
+                anim.start(self.no_detection_label)
+                return
+                    
+            # Add detection items with staggered animations
+            for i, box in enumerate(drowning_boxes):
+                # Use a delay based on the index
+                delay = 0.08 * i  # 80ms between each card animation
+                
+                detection_card = AnimatedCard(
+                    orientation='vertical',
+                    size_hint_y=None,
+                    height=dp(100),
+                    padding=[dp(12), dp(8)],
+                    animation_delay=delay,
+                    entrance_animation='rise'
+                )
+                
+                # Rest of the detection card creation remains the same
+                detection_label = MDLabel(
+                    text=f"Drowning Person #{i+1}",
+                    theme_text_color="Custom",
+                    text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
+                    font_style="Subtitle1",
+                    bold=True,
+                    size_hint_y=None,
+                    height=dp(30)
+                )
+                
+                coordinates = GridLayout(
+                    cols=2,
+                    spacing=[dp(8), dp(8)],
+                    size_hint_y=None,
+                    height=dp(50),
+                    padding=[0, dp(5)]
+                )
+                
+                center_x = box.get('center_x', 0)
+                center_y = box.get('center_y', 0)
+                
+                # Create x coordinate box with proper rectangle reference
+                x_box = BoxLayout(
+                    orientation='vertical',
+                    size_hint_y=None,
+                    height=dp(36)
+                )
+                
+                with x_box.canvas.before:
+                    Color(*get_color_from_hex(DARK_ACCENT + "33"))
+                    x_rect = Rectangle(pos=x_box.pos, size=x_box.size)
+                    x_box.rect = x_rect  # Store reference to rectangle
+                
+                # Safe binding using the stored reference
+                def update_x_rect(instance, value):
+                    instance.rect.pos = instance.pos
+                    instance.rect.size = instance.size
+                
+                x_box.bind(pos=update_x_rect, size=update_x_rect)
+                
+                x_label = MDLabel(
+                    text=f"X: {center_x}",
+                    theme_text_color="Custom",
+                    text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
+                    halign='center',
+                    valign='middle'
+                )
+                x_box.add_widget(x_label)
+                
+                # Create y coordinate box with proper rectangle reference
+                y_box = BoxLayout(
+                    orientation='vertical',
+                    size_hint_y=None,
+                    height=dp(36)
+                )
+                
+                with y_box.canvas.before:
+                    Color(*get_color_from_hex(DARK_ACCENT + "33"))
+                    y_rect = Rectangle(pos=y_box.pos, size=y_box.size)
+                    y_box.rect = y_rect  # Store reference to rectangle
+                
+                # Safe binding using the stored reference
+                def update_y_rect(instance, value):
+                    instance.rect.pos = instance.pos
+                    instance.rect.size = instance.size
+                
+                y_box.bind(pos=update_y_rect, size=update_y_rect)
+                
+                y_label = MDLabel(
+                    text=f"Y: {center_y}",
+                    theme_text_color="Custom",
+                    text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
+                    halign='center',
+                    valign='middle'
+                )
+                y_box.add_widget(y_label)
+                
+                coordinates.add_widget(x_box)
+                coordinates.add_widget(y_box)
+                
+                detection_card.add_widget(detection_label)
+                detection_card.add_widget(coordinates)
+                
+                self.container.add_widget(detection_card)
+        
+        # Start the fade out animation, then add new content
+        if self.container.children:
+            fade_out.bind(on_complete=add_new_content)
+            fade_out.start(self.container)
+        else:
+            add_new_content()
 
 
 class ConnectionScreen(Screen):
@@ -452,6 +591,23 @@ class ConnectionScreen(Screen):
         main_layout.add_widget(footer)
         
         self.add_widget(main_layout)
+        
+        # Prepare for content animation
+        for child in main_layout.children:
+            child.opacity = 0
+        
+        # Schedule animations with staggered timing
+        Clock.schedule_once(lambda dt: self.animate_contents(), 0.1)
+    
+    def animate_contents(self):
+        """Animate the contents of the screen"""
+        children = list(self.children[0].children)
+        children.reverse()  # Animate from top to bottom
+        
+        for i, child in enumerate(children):
+            delay = 0.05 * i  # 50ms delay between each item
+            anim = Animation(opacity=0, duration=0) + Animation(opacity=1, duration=0.3, transition='out_quad')
+            Clock.schedule_once(lambda dt, w=child: anim.start(w), delay)
     
     def _update_rect(self, instance, value):
         self.rect.pos = instance.pos
@@ -786,7 +942,7 @@ class VideoScreen(Screen):
             img = PILImage.open(img_buffer)
             
             # Ensure we have the right format for Kivy
-            if img.mode != 'RGBA':
+            if (img.mode != 'RGBA'):
                 img = img.convert('RGBA')
             
             # Get the image data as bytes
@@ -855,8 +1011,21 @@ class AIDRONeApp(MDApp):
         self.is_running = False
         self.connection_callbacks = {}
         
-        # Create screen manager with smooth transitions
-        self.sm = ScreenManager(transition=FadeTransition(duration=0.2))
+        # Create screen manager with custom transitions
+        self.sm = ScreenManager()
+        
+        # Custom transition functions for different screen changes
+        def custom_slide_transition():
+            return SlideTransition(direction='left', duration=0.3)
+            
+        def custom_fade_transition():
+            return FadeTransition(duration=0.2)
+        
+        self.transitions = {
+            'slide': custom_slide_transition,
+            'fade': custom_fade_transition
+        }
+        
         self.connection_screen = ConnectionScreen(name="connection_screen")
         self.waiting_screen = WaitingScreen(name="waiting_screen")
         self.video_screen = VideoScreen(name="video_screen")
@@ -1028,8 +1197,30 @@ class AIDRONeApp(MDApp):
         self.sm.current = "waiting_screen"
     
     def show_video_screen(self):
-        self.sm.transition = FadeTransition(duration=0.2)
+        # Use an attention-grabbing transition for alerts
+        self.sm.transition = FadeTransition(duration=0.1)
         self.sm.current = "video_screen"
+        
+        # Flash the screen red briefly to draw attention
+        overlay = Widget(size_hint=(1, 1), pos_hint={'center_x': 0.5, 'center_y': 0.5})
+        
+        with overlay.canvas:
+            Color(1, 0, 0, 0.3)  # Semi-transparent red
+            rect = Rectangle(pos=(0, 0), size=Window.size)
+        
+        def remove_overlay(*args):
+            if overlay.parent:
+                overlay.parent.remove_widget(overlay)
+        
+        # Add overlay to window, then fade it out
+        Window.add_widget(overlay)
+        anim = Animation(opacity=0, duration=0.5)
+        anim.bind(on_complete=remove_overlay)
+        
+        # Short delay before fading
+        Clock.schedule_once(lambda dt: anim.start(overlay), 0.2)
+        
+        # Update status with animation
         self.video_screen.update_status("ALERT: Drowning Detected!", connected=False)
     
     def stop_websocket(self):
