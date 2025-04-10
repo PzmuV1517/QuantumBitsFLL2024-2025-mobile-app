@@ -236,32 +236,25 @@ class AlertMessage(BoxLayout):
         self.rect.size = self.size
     
     def show(self):
-        if not self.visible:
-            self.visible = True
-            self.height = 0  # Start with zero height
-            
-            # First grow the height
-            height_anim = Animation(height=dp(60), duration=0.3, transition='out_quad')
-            
-            # Then fade in and start pulsing
-            def after_height(*args):
-                self.opacity = 0
-                fade_anim = Animation(opacity=1, duration=0.2)
-                fade_anim.bind(on_complete=lambda *args: self.start_pulse_animation())
-                fade_anim.start(self)
-                
-            height_anim.bind(on_complete=after_height)
-            height_anim.start(self)
-            
-            # Try to vibrate the phone
-            try:
-                from jnius import autoclass
-                vibrator = autoclass('android.os.Vibrator')
-                activity = autoclass('org.kivy.android.PythonActivity').mActivity
-                vibrator = activity.getSystemService(activity.VIBRATOR_SERVICE)
-                vibrator.vibrate([0, 300, 100, 300, 100, 300], -1)  # Vibrate in a pattern
-            except Exception as e:
-                print(f"Could not vibrate: {e}")
+        """Show alert message without complex animations"""
+        self.visible = True
+        self.opacity = 1
+        self.height = dp(60)
+        
+        # Simple pulsing effect without advanced animations
+        anim = Animation(opacity=1, duration=0.5) + Animation(opacity=0.7, duration=0.5)
+        anim.repeat = True
+        anim.start(self)
+        
+        # Try to vibrate the phone
+        try:
+            from jnius import autoclass
+            vibrator = autoclass('android.os.Vibrator')
+            activity = autoclass('org.kivy.android.PythonActivity').mActivity
+            vibrator = activity.getSystemService(activity.VIBRATOR_SERVICE)
+            vibrator.vibrate(500)  # Simple vibration
+        except Exception as e:
+            print(f"Could not vibrate: {e}")
     
     def hide(self):
         if self.visible:
@@ -279,17 +272,10 @@ class AlertMessage(BoxLayout):
                 pass
     
     def start_pulse_animation(self):
-        # Attention-grabbing pulse animation for opacity
-        anim = (Animation(opacity=1, duration=0.4) + 
-                Animation(opacity=0.7, duration=0.4))
-        anim.repeat = True
-        anim.start(self)
-        
-        # Use size_hint for subtle "scaling" effect instead of scale property
-        size_anim = (Animation(size_hint=(1.02, 1.02), duration=0.4) + 
-                    Animation(size_hint=(1.0, 1.0), duration=0.4))
-        size_anim.repeat = True
-        size_anim.start(self.message)
+        """Simple pulsing animation"""
+        # This is intentionally left empty as we're now handling
+        # the animation directly in the show() method
+        pass
     
     def stop_pulse_animation(self):
         Animation.cancel_all(self)
@@ -330,127 +316,106 @@ class DetectionInfo(ScrollView):
         self.add_widget(self.container)
     
     def update_detections(self, drowning_boxes=None):
-        # First fade out existing content
-        fade_out = Animation(opacity=0, duration=0.15)
+        """Update detection information without animations"""
+        # Clear existing widgets
+        self.container.clear_widgets()
         
-        def add_new_content(*args):
-            self.container.clear_widgets()
-            self.container.opacity = 1  # Reset opacity
+        if not drowning_boxes or len(drowning_boxes) == 0:
+            self.container.add_widget(self.no_detection_label)
+            return
+                
+        # Add detection items without animations
+        for i, box in enumerate(drowning_boxes):
+            # Use regular DarkCard instead of AnimatedCard
+            detection_card = DarkCard(
+                orientation='vertical',
+                size_hint_y=None,
+                height=dp(100),
+                padding=[dp(12), dp(8)]
+            )
             
-            if not drowning_boxes or len(drowning_boxes) == 0:
-                self.container.add_widget(self.no_detection_label)
-                # Animate the no detection label
-                self.no_detection_label.opacity = 0
-                anim = Animation(opacity=1, duration=0.3)
-                anim.start(self.no_detection_label)
-                return
-                    
-            # Add detection items with staggered animations
-            for i, box in enumerate(drowning_boxes):
-                # Use a delay based on the index
-                delay = 0.08 * i  # 80ms between each card animation
-                
-                detection_card = AnimatedCard(
-                    orientation='vertical',
-                    size_hint_y=None,
-                    height=dp(100),
-                    padding=[dp(12), dp(8)],
-                    animation_delay=delay,
-                    entrance_animation='rise'
-                )
-                
-                # Rest of the detection card creation remains the same
-                detection_label = MDLabel(
-                    text=f"Drowning Person #{i+1}",
-                    theme_text_color="Custom",
-                    text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
-                    font_style="Subtitle1",
-                    bold=True,
-                    size_hint_y=None,
-                    height=dp(30)
-                )
-                
-                coordinates = GridLayout(
-                    cols=2,
-                    spacing=[dp(8), dp(8)],
-                    size_hint_y=None,
-                    height=dp(50),
-                    padding=[0, dp(5)]
-                )
-                
-                center_x = box.get('center_x', 0)
-                center_y = box.get('center_y', 0)
-                
-                # Create x coordinate box with proper rectangle reference
-                x_box = BoxLayout(
-                    orientation='vertical',
-                    size_hint_y=None,
-                    height=dp(36)
-                )
-                
-                with x_box.canvas.before:
-                    Color(*get_color_from_hex(DARK_ACCENT + "33"))
-                    x_rect = Rectangle(pos=x_box.pos, size=x_box.size)
-                    x_box.rect = x_rect  # Store reference to rectangle
-                
-                # Safe binding using the stored reference
-                def update_x_rect(instance, value):
-                    instance.rect.pos = instance.pos
-                    instance.rect.size = instance.size
-                
-                x_box.bind(pos=update_x_rect, size=update_x_rect)
-                
-                x_label = MDLabel(
-                    text=f"X: {center_x}",
-                    theme_text_color="Custom",
-                    text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
-                    halign='center',
-                    valign='middle'
-                )
-                x_box.add_widget(x_label)
-                
-                # Create y coordinate box with proper rectangle reference
-                y_box = BoxLayout(
-                    orientation='vertical',
-                    size_hint_y=None,
-                    height=dp(36)
-                )
-                
-                with y_box.canvas.before:
-                    Color(*get_color_from_hex(DARK_ACCENT + "33"))
-                    y_rect = Rectangle(pos=y_box.pos, size=y_box.size)
-                    y_box.rect = y_rect  # Store reference to rectangle
-                
-                # Safe binding using the stored reference
-                def update_y_rect(instance, value):
-                    instance.rect.pos = instance.pos
-                    instance.rect.size = instance.size
-                
-                y_box.bind(pos=update_y_rect, size=update_y_rect)
-                
-                y_label = MDLabel(
-                    text=f"Y: {center_y}",
-                    theme_text_color="Custom",
-                    text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
-                    halign='center',
-                    valign='middle'
-                )
-                y_box.add_widget(y_label)
-                
-                coordinates.add_widget(x_box)
-                coordinates.add_widget(y_box)
-                
-                detection_card.add_widget(detection_label)
-                detection_card.add_widget(coordinates)
-                
-                self.container.add_widget(detection_card)
-        
-        # Start the fade out animation, then add new content
-        if self.container.children:
-            fade_out.bind(on_complete=add_new_content)
-            fade_out.start(self.container)
-        else:
-            add_new_content()
+            detection_label = MDLabel(
+                text=f"Drowning Person #{i+1}",
+                theme_text_color="Custom",
+                text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
+                font_style="Subtitle1",
+                bold=True,
+                size_hint_y=None,
+                height=dp(30)
+            )
+            
+            coordinates = GridLayout(
+                cols=2,
+                spacing=[dp(8), dp(8)],
+                size_hint_y=None,
+                height=dp(50),
+                padding=[0, dp(5)]
+            )
+            
+            center_x = box.get('center_x', 0)
+            center_y = box.get('center_y', 0)
+            
+            # Create x coordinate box with proper rectangle reference
+            x_box = BoxLayout(
+                orientation='vertical',
+                size_hint_y=None,
+                height=dp(36)
+            )
+            
+            with x_box.canvas.before:
+                Color(*get_color_from_hex(DARK_ACCENT + "33"))
+                x_rect = Rectangle(pos=x_box.pos, size=x_box.size)
+                x_box.rect = x_rect  # Store reference to rectangle
+            
+            # Safe binding using the stored reference
+            def update_x_rect(instance, value):
+                instance.rect.pos = instance.pos
+                instance.rect.size = instance.size
+            x_box.bind(pos=update_x_rect, size=update_x_rect)
+            
+            x_label = MDLabel(
+                text=f"X: {center_x}",
+                theme_text_color="Custom",
+                text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
+                halign='center',
+                valign='middle'
+            )
+            x_box.add_widget(x_label)
+            
+            # Create y coordinate box with proper rectangle reference
+            y_box = BoxLayout(
+                orientation='vertical',
+                size_hint_y=None,
+                height=dp(36)
+            )
+            
+            with y_box.canvas.before:
+                Color(*get_color_from_hex(DARK_ACCENT + "33"))
+                y_rect = Rectangle(pos=y_box.pos, size=y_box.size)
+                y_box.rect = y_rect  # Store reference to rectangle
+            
+            # Safe binding using the stored reference
+            def update_y_rect(instance, value):
+                instance.rect.pos = instance.pos
+                instance.rect.size = instance.size
+            y_box.bind(pos=update_y_rect, size=update_y_rect)
+            
+            y_label = MDLabel(
+                text=f"Y: {center_y}",
+                theme_text_color="Custom",
+                text_color=get_color_from_hex(DARK_TEXT_PRIMARY),
+                halign='center',
+                valign='middle'
+            )
+            y_box.add_widget(y_label)
+            
+            coordinates.add_widget(x_box)
+            coordinates.add_widget(y_box)
+            
+            detection_card.add_widget(detection_label)
+            detection_card.add_widget(coordinates)
+            
+            self.container.add_widget(detection_card)
 
 
 class ConnectionScreen(Screen):
